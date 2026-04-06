@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+_pak_index_cache.json
+_mod_registry.json
+_MOD_BACKUPS/
+filenames.json
+*.pak
+NMS_MOD_INSTALLER.md
