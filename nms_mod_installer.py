@@ -9,7 +9,7 @@ Requires: hgpaktool (pip3 install --user hgpaktool)
 
 Usage:
     python3 nms_mod_installer.py set-game <path>
-    python3 nms_mod_installer.py install <mod_folder> [--game <path>] [--dry-run]
+    python3 nms_mod_installer.py install <mod_folder> [--game <path>]
     python3 nms_mod_installer.py uninstall <mod_name>  [--game <path>]
     python3 nms_mod_installer.py list                  [--game <path>]
     python3 nms_mod_installer.py scan <mod_folder>     [--game <path>]
@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -497,7 +498,7 @@ def scan_mod(mod_folder: Path, banks_dir: Path, tool_path: str):
 
 
 def install_mod(mod_folder: Path, game_path: Path, banks_dir: Path, tool_path: str,
-                dry_run=False, force_reindex=False):
+                force_reindex=False):
     """Full mod installation pipeline."""
     mod_name = mod_folder.name
     info(f"Installing mod: {Style.BOLD}{mod_name}{Style.RESET}")
@@ -545,11 +546,6 @@ def install_mod(mod_folder: Path, game_path: Path, banks_dir: Path, tool_path: s
         for u in unmatched:
             print(f"    {Style.DIM}{u}{Style.RESET}")
 
-    if dry_run:  
-        print()
-        info("Dry run complete. No files were modified.")
-        return True
-
     # 2) Backup
     print()
     info("Phase 2: Backing up original pak files...")
@@ -570,6 +566,8 @@ def install_mod(mod_folder: Path, game_path: Path, banks_dir: Path, tool_path: s
     # 3) Extract, Replace, Repack
     print()
     info("Phase 3: Patching pak archives...")
+    total_replaced_files = 0
+    patched_paks = []
 
     with tempfile.TemporaryDirectory(prefix="nms_mod_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -635,14 +633,21 @@ def install_mod(mod_folder: Path, game_path: Path, banks_dir: Path, tool_path: s
             original_size = pak_path.stat().st_size
             shutil.copy2(output_pak, pak_path)
             success(f"  Installed: {pak_name} ({human_size(original_size)} -> {human_size(final_size)})")
+            total_replaced_files += replaced
+            patched_paks.append(pak_name)
 
     # 4) Register
+    if total_replaced_files == 0:
+        warn("No files were replaced in any pak archive.")
+        warn("Install aborted: likely EXML/MBIN conversion or mod compatibility issue.")
+        return False
+
     print()
     registry.register(mod_name, {
         "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source_folder": str(mod_folder),
-        "affected_paks": list(pak_map.keys()),
-        "file_count": sum(len(v) for v in pak_map.values()),
+        "affected_paks": patched_paks,
+        "file_count": total_replaced_files,
         "backed_up_paks": backed_up_paks,
     })
 
@@ -731,6 +736,191 @@ def list_mods(banks_dir: Path):
     info(f"To uninstall: python3 nms_mod_installer.py uninstall <number>")
 
 
+def _clean_user_path(path_str: str) -> Path:
+    cleaned = path_str.strip()
+    # Accept both plain and shell-escaped drag/drop paths from Terminal.
+    try:
+        parts = shlex.split(cleaned)
+        if len(parts) == 1:
+            cleaned = parts[0]
+    except ValueError:
+        pass
+    cleaned = cleaned.strip().strip('"').strip("'").strip()
+    return Path(cleaned).expanduser().resolve()
+
+
+def _resolve_game_path_for_wizard() -> Tuple[Path, Path]:
+    """Resolve game path interactively without exiting the wizard."""
+    config = load_config()
+    saved = config.get("game_path")
+    if saved:
+        gp = Path(saved).expanduser()
+        banks = gp / MACOSBANKS_REL
+        if gp.exists() and banks.exists():
+            info(f"Using saved game path: {gp}")
+            return gp, banks
+        warn(f"Saved path is invalid: {saved}")
+
+    detected = auto_detect_game()
+    if detected:
+        gp = Path(detected)
+        banks = gp / MACOSBANKS_REL
+        info(f"Auto-detected game path: {gp}")
+        config["game_path"] = str(gp)
+        save_config(config)
+        return gp, banks
+
+    while True:
+        print()
+        raw = input("Enter path to No Man's Sky.app: ").strip()
+        gp = _clean_user_path(raw)
+        banks = gp / MACOSBANKS_REL
+        if not gp.exists():
+            warn(f"Path not found: {gp}")
+            continue
+        if not banks.exists():
+            warn(f"MACOSBANKS not found under: {gp}")
+            continue
+        config["game_path"] = str(gp)
+        save_config(config)
+        success(f"Game path saved: {gp}")
+        return gp, banks
+
+
+def _resolve_mod_name_soft(identifier: str, banks_dir: Path) -> Optional[str]:
+    """Resolve by index or name without exiting process."""
+    registry = ModRegistry(banks_dir)
+    mods = registry.list_mods()
+    if not mods:
+        warn("No mods are installed.")
+        return None
+
+    mod_names = list(mods.keys())
+    try:
+        idx = int(identifier)
+        if 1 <= idx <= len(mod_names):
+            return mod_names[idx - 1]
+        warn(f"Invalid index: {idx}. Use 1..{len(mod_names)}.")
+        return None
+    except ValueError:
+        pass
+
+    if identifier in mods:
+        return identifier
+    for name in mod_names:
+        if name.lower() == identifier.lower():
+            return name
+
+    warn(f"Mod '{identifier}' not found.")
+    return None
+
+
+def run_wizard():
+    """Interactive beginner-friendly CLI flow."""
+    print(f"{Style.BOLD}Interactive Wizard{Style.RESET}")
+    print(f"{Style.DIM}Simple step-by-step mode for new users{Style.RESET}\n")
+
+    tool = find_hgpaktool()
+    if not tool:
+        fatal(
+            "hgpaktool not found. Install it with:\n"
+            "  pip3 install --user hgpaktool"
+        )
+    info(f"Using hgpaktool: {tool}")
+
+    game_path, banks_dir = _resolve_game_path_for_wizard()
+    info(f"Game: {game_path}")
+    print()
+
+    while True:
+        print(f"{Style.BOLD}Choose an action:{Style.RESET}")
+        print("  1) Scan mod folder (preview)")
+        print("  2) Install mod")
+        print("  3) List installed mods")
+        print("  4) Uninstall mod")
+        print("  5) Change game path")
+        print("  0) Exit")
+        choice = input("> ").strip()
+        print()
+
+        try:
+            if choice == "1":
+                mod_raw = input("Mod folder path: ").strip()
+                mod_folder = _clean_user_path(mod_raw)
+                if not mod_folder.is_dir():
+                    warn(f"Folder not found: {mod_folder}")
+                    continue
+                pak_map, unmatched = scan_mod(mod_folder, banks_dir, tool)
+                if pak_map:
+                    info(f"Mod would affect {len(pak_map)} pak(s):")
+                    for pak_name, files in sorted(pak_map.items()):
+                        print(f"  {Style.CYAN}{pak_name}{Style.RESET} ({len(files)} file(s))")
+                else:
+                    warn("No mod files matched any game pak archive.")
+                if unmatched:
+                    warn(f"{len(unmatched)} file(s) did not match any pak.")
+                print()
+
+            elif choice == "2":
+                mod_raw = input("Mod folder path: ").strip()
+                mod_folder = _clean_user_path(mod_raw)
+                if not mod_folder.is_dir():
+                    warn(f"Folder not found: {mod_folder}")
+                    continue
+                force_reindex_raw = input("Force reindex? [N/y] (default: no): ").strip().lower()
+                force_reindex = force_reindex_raw in {"y", "yes"}
+                print()
+                install_mod(
+                    mod_folder,
+                    game_path,
+                    banks_dir,
+                    tool,
+                    force_reindex=force_reindex,
+                )
+                print()
+
+            elif choice == "3":
+                list_mods(banks_dir)
+                print()
+
+            elif choice == "4":
+                list_mods(banks_dir)
+                ident = input("Enter mod index or name to uninstall: ").strip()
+                resolved = _resolve_mod_name_soft(ident, banks_dir)
+                if not resolved:
+                    continue
+                uninstall_mod(resolved, banks_dir)
+                print()
+
+            elif choice == "5":
+                print("Current path:", game_path)
+                raw = input("New No Man's Sky.app path: ").strip()
+                gp = _clean_user_path(raw)
+                banks = gp / MACOSBANKS_REL
+                if not gp.exists():
+                    warn(f"Path not found: {gp}")
+                    continue
+                if not banks.exists():
+                    warn(f"MACOSBANKS not found under: {gp}")
+                    continue
+                config = load_config()
+                config["game_path"] = str(gp)
+                save_config(config)
+                game_path, banks_dir = gp, banks
+                success(f"Game path updated: {gp}")
+                print()
+
+            elif choice == "0":
+                info("Goodbye.")
+                return
+            else:
+                warn("Invalid choice. Please select 0-5.")
+                print()
+        except RuntimeError as e:
+            error(f"Operation failed: {e}")
+            print()
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -742,7 +932,7 @@ def main():
 examples:
   %(prog)s set-game "/Applications/No Man's Sky.app"
   %(prog)s install "~/Downloads/Turkish Localisation"
-  %(prog)s install ./MyMod --dry-run
+  %(prog)s install ./MyMod
   %(prog)s uninstall 2
   %(prog)s list
   %(prog)s scan ./MyMod
@@ -761,7 +951,6 @@ examples:
     p_install = sub.add_parser("install", help="Install a mod from a folder")
     p_install.add_argument("mod_folder", help="Path to the mod folder")
     p_install.add_argument("--game", default=None, help=game_help)
-    p_install.add_argument("--dry-run", action="store_true", help="Preview without making changes")
     p_install.add_argument("--force-reindex", action="store_true", help="Force rebuild of pak index cache")
 
     # uninstall
@@ -778,6 +967,9 @@ examples:
     p_scan.add_argument("mod_folder", help="Path to the mod folder")
     p_scan.add_argument("--game", default=None, help=game_help)
 
+    # wizard
+    sub.add_parser("wizard", help="Interactive step-by-step mode (beginner friendly)")
+
     args = parser.parse_args()
 
     # Header
@@ -785,6 +977,10 @@ examples:
     print(f"{Style.BOLD}NMS Mod Installer for macOS{Style.RESET}")
     print(f"{Style.DIM}HGPAK extract / replace / repack pipeline{Style.RESET}")
     print()
+
+    if args.command == "wizard":
+        run_wizard()
+        return
 
     # Locate hgpaktool
     tool = find_hgpaktool()
@@ -820,7 +1016,7 @@ examples:
         if not mod_folder.is_dir():
             fatal(f"Mod folder not found: {mod_folder}")
         install_mod(mod_folder, game_path, banks_dir, tool,
-                    dry_run=args.dry_run, force_reindex=args.force_reindex)
+                    force_reindex=args.force_reindex)
 
     elif args.command == "uninstall":
         mod_name = resolve_mod_name(args.mod_name, banks_dir)

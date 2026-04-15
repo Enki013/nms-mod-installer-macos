@@ -34,6 +34,7 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
 - **macOS** (tested on macOS 15+)
 - **Python 3.9+** (pre-installed on macOS)
 - **[hgpaktool](https://github.com/monkeyman192/HGPAKtool)** — HGPAK archive tool by monkeyman192
+- **.NET 8 Runtime** (`Microsoft.NETCore.App 8.x`) — required for EXML-based mods (MBINCompiler)
 
 ## Installation
 
@@ -42,12 +43,14 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
 pip3 install --user hgpaktool
 
 # 2. Clone this repo
-git clone https://github.com/YOUR_USERNAME/nms-mod-installer-macos.git
+git clone https://github.com/Enki013/nms-mod-installer-macos.git
 cd nms-mod-installer-macos
 
-# 3. Make executable (optional)
+# 3. Make executable (required for ./ shortcuts below)
 chmod +x nms_mod_installer.py
 ```
+
+Commands below assume your shell’s current directory is the repo folder (`nms-mod-installer-macos` or wherever you cloned it). From anywhere else you can still run `python3 /path/to/nms_mod_installer.py …`.
 
 ## Usage
 
@@ -56,7 +59,7 @@ chmod +x nms_mod_installer.py
 The tool auto-detects the game in common locations (`/Applications`, `~/Applications`, Steam library). If auto-detection fails, set it manually:
 
 ```bash
-python3 nms_mod_installer.py set-game "/Applications/No Man's Sky.app"
+./nms_mod_installer.py set-game "/Applications/No Man's Sky.app"
 ```
 
 The path is saved and remembered for future runs. You can also use `--game <path>` with any command to override.
@@ -64,31 +67,35 @@ The path is saved and remembered for future runs. You can also use `--game <path
 ### Scan a mod (preview, no changes)
 
 ```bash
-python3 nms_mod_installer.py scan ~/Downloads/MyMod
+./nms_mod_installer.py scan ~/Downloads/MyMod
 ```
 
 Shows which `.pak` files the mod will affect without modifying anything.
 
+### Interactive wizard (beginner mode)
+
+```bash
+./nms_mod_installer.py wizard
+```
+
+Step-by-step guided CLI flow for scan/install/list/uninstall without remembering commands.
+
 ### Install a mod
 
 ```bash
-python3 nms_mod_installer.py install ~/Downloads/MyMod
+./nms_mod_installer.py install ~/Downloads/MyMod
 ```
 
 Full pipeline: scan, backup originals, extract, replace, repack, install.
 
 <img src="docs/images/install.gif" alt="Install command in terminal">
 
-Use `--dry-run` to preview first:
-
-```bash
-python3 nms_mod_installer.py install ~/Downloads/MyMod --dry-run
-```
+To preview which paks a mod touches without installing, use `scan` (see above).
 
 ### List installed mods
 
 ```bash
-python3 nms_mod_installer.py list
+./nms_mod_installer.py list
 ```
 
 <img src="docs/images/list.png" alt="Installed mods list with index numbers" width="900">
@@ -96,9 +103,9 @@ python3 nms_mod_installer.py list
 ### Uninstall a mod
 
 ```bash
-python3 nms_mod_installer.py uninstall 2
+./nms_mod_installer.py uninstall 2
 # or by name:
-python3 nms_mod_installer.py uninstall "MyMod"
+./nms_mod_installer.py uninstall "MyMod"
 ```
 
 Restores original `.pak` files from backup.
@@ -110,7 +117,6 @@ Restores original `.pak` files from backup.
 | Flag | Description |
 |---|---|
 | `--game <path>` | Path to `No Man's Sky.app` (auto-detected or saved via `set-game`) |
-| `--dry-run` | Preview changes without modifying any files |
 | `--force-reindex` | Rebuild the pak index cache (use after game updates) |
 
 ## Mod Folder Structure
@@ -139,7 +145,7 @@ The tool automatically determines which `.pak` archive each file belongs to.
 
 ```bash
 # Preview
-python3 nms_mod_installer.py scan ~/Downloads/Turkish\ Localisation
+./nms_mod_installer.py scan ~/Downloads/Turkish\ Localisation
 
 # Output:
 # Mod would affect 3 pak(s):
@@ -148,13 +154,13 @@ python3 nms_mod_installer.py scan ~/Downloads/Turkish\ Localisation
 #   NMSARC.fonts.pak       (1 file)
 
 # Install
-python3 nms_mod_installer.py install ~/Downloads/Turkish\ Localisation
+./nms_mod_installer.py install ~/Downloads/Turkish\ Localisation
 
 # Verify
-python3 nms_mod_installer.py list
+./nms_mod_installer.py list
 
 # Uninstall if needed
-python3 nms_mod_installer.py uninstall 1
+./nms_mod_installer.py uninstall 1
 ```
 
 ## Game File Structure (macOS)
@@ -205,6 +211,18 @@ On first run, the tool scans all `.pak` files and builds an index cache (`_pak_i
 
 ## Troubleshooting
 
+### Permission denied (do not use `sudo python3`)
+
+The installer must write inside `No Man's Sky.app/.../MACOSBANKS/`. If you see **Permission denied**, do **not** run it as `sudo python3 …` (that runs the script as root and can confuse file ownership).
+
+**Preferred:** install or copy the game under your user, e.g. `~/Applications/No Man's Sky.app`, so you already own the files.
+
+**If the game is in `/Applications` and owned by root**, fix ownership once, then use `./nms_mod_installer.py` as your normal user:
+
+```bash
+sudo chown -R "$(whoami)" "/Applications/No Man's Sky.app"
+```
+
 ### hgpaktool not found
 
 ```bash
@@ -214,12 +232,28 @@ pip3 install --user hgpaktool
 export PATH="$PATH:$HOME/Library/Python/3.9/bin"
 ```
 
+### .NET runtime mismatch (EXML mods)
+
+If you see an error like:
+- `You must install or update .NET to run this application`
+- `Framework: 'Microsoft.NETCore.App', version '8.0.xx'`
+
+Install **.NET 8 Runtime** (arm64 on Apple Silicon), then verify:
+
+[Download .NET 8](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
+
+```bash
+dotnet --list-runtimes
+```
+
+You should see `Microsoft.NETCore.App 8.0.x`.
+
 ### Mod stopped working after game update
 
 Game updates overwrite `.pak` files. Reinstall the mod:
 
 ```bash
-python3 nms_mod_installer.py install ~/Downloads/MyMod --force-reindex
+./nms_mod_installer.py install ~/Downloads/MyMod --force-reindex
 ```
 
 ### Game won't launch / crashes
@@ -227,7 +261,7 @@ python3 nms_mod_installer.py install ~/Downloads/MyMod --force-reindex
 Remove mods and restore originals:
 
 ```bash
-python3 nms_mod_installer.py uninstall "MyMod"
+./nms_mod_installer.py uninstall "MyMod"
 ```
 
 Or manually:
