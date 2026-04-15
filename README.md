@@ -14,15 +14,15 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
                           │                                                   │
                      Maps mod files                                    LZ4 compressed
                      to game .paks                                     HGPAK v2 format
-                     (181K+ files                                           │
-                      across 99 paks)                                       ▼
+                                                                            │
+                                                                            ▼
                                                                     ┌──────────────┐
                                                                     │  MACOSBANKS/ │
                                                                     │  (game dir)  │
                                                                     └──────────────┘
 ```
 
-1. **Scan** — Indexes all 99 `.pak` archives in the game (~181K files) and maps each mod file to its target `.pak`
+1. **Scan** — Indexes all `.pak` archives in the game and maps each mod file to its target `.pak`
 2. **Backup** — Copies original `.pak` files to `_MOD_BACKUPS/` before any changes
 3. **Extract** — Unpacks affected `.pak` archives using `hgpaktool -U -M`
 4. **Replace** — Overwrites extracted files with mod versions (case-insensitive matching)
@@ -51,6 +51,16 @@ chmod +x nms_mod_installer.py
 
 ## Usage
 
+### Set game path (first time only)
+
+The tool auto-detects the game in common locations (`/Applications`, `~/Applications`, Steam library). If auto-detection fails, set it manually:
+
+```bash
+python3 nms_mod_installer.py set-game "/Applications/No Man's Sky.app"
+```
+
+The path is saved and remembered for future runs. You can also use `--game <path>` with any command to override.
+
 ### Scan a mod (preview, no changes)
 
 ```bash
@@ -67,6 +77,8 @@ python3 nms_mod_installer.py install ~/Downloads/MyMod
 
 Full pipeline: scan, backup originals, extract, replace, repack, install.
 
+<img src="docs/images/install.gif" alt="Install command in terminal">
+
 Use `--dry-run` to preview first:
 
 ```bash
@@ -79,19 +91,25 @@ python3 nms_mod_installer.py install ~/Downloads/MyMod --dry-run
 python3 nms_mod_installer.py list
 ```
 
+<img src="docs/images/list.png" alt="Installed mods list with index numbers" width="900">
+
 ### Uninstall a mod
 
 ```bash
+python3 nms_mod_installer.py uninstall 2
+# or by name:
 python3 nms_mod_installer.py uninstall "MyMod"
 ```
 
 Restores original `.pak` files from backup.
 
+<img src="docs/images/uninstall.png" alt="Uninstalling a mod by index" width="900">
+
 ### Options
 
 | Flag | Description |
 |---|---|
-| `--game <path>` | Path to `No Man's Sky.app` (auto-detected by default) |
+| `--game <path>` | Path to `No Man's Sky.app` (auto-detected or saved via `set-game`) |
 | `--dry-run` | Preview changes without modifying any files |
 | `--force-reindex` | Rebuild the pak index cache (use after game updates) |
 
@@ -136,7 +154,7 @@ python3 nms_mod_installer.py install ~/Downloads/Turkish\ Localisation
 python3 nms_mod_installer.py list
 
 # Uninstall if needed
-python3 nms_mod_installer.py uninstall "Turkish Localisation"
+python3 nms_mod_installer.py uninstall 1
 ```
 
 ## Game File Structure (macOS)
@@ -161,7 +179,7 @@ No Man's Sky.app/
     ├── NMSARC.UI.pak            # UI definitions
     ├── NMSARC.TexPlanet*.pak    # Planet textures (per-biome)
     ├── NMSARC.MeshPlanet*.pak   # 3D models
-    └── ... (99 pak files total, ~181K internal files)
+    └── ...
 ```
 
 ## Technical Details
@@ -183,7 +201,7 @@ hgpaktool -R -Z <manifest> -O <output.pak>  # Repack with compression
 
 ### Caching
 
-On first run, the tool scans all 99 `.pak` files and builds an index cache (`_pak_index_cache.json`). This cache is valid for 24 hours. After a game update, use `--force-reindex` to rebuild it.
+On first run, the tool scans all `.pak` files and builds an index cache (`_pak_index_cache.json`). This cache is valid for 24 hours. After a game update, use `--force-reindex` to rebuild it.
 
 ## Troubleshooting
 
@@ -224,13 +242,13 @@ cp _MOD_BACKUPS/MyMod/*.pak ./
 Modifying `.pak` files may break the app's code signature:
 
 ```bash
-xattr -cr ~/Desktop/No\ Man\'s\ Sky.app
-codesign --force --deep --sign - ~/Desktop/No\ Man\'s\ Sky.app
+xattr -cr ~/Applications/No\ Man\'s\ Sky.app
+codesign --force --deep --sign - ~/Applications/No\ Man\'s\ Sky.app
 ```
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ## Credits
 

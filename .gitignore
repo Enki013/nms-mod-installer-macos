@@ -3,6 +3,7 @@ __pycache__/
 .DS_Store
 _pak_index_cache.json
 _mod_registry.json
+_config.json
 _MOD_BACKUPS/
 filenames.json
 *.pak
