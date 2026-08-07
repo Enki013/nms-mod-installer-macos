@@ -248,6 +248,37 @@ dotnet --list-runtimes
 
 You should see `Microsoft.NETCore.App 8.0.x`.
 
+### `.NET` is installed but `dotnet` is not found
+
+If you've already installed the .NET SDK but the installer still reports that `dotnet` is missing, try the following:
+
+1. Close and reopen Terminal.
+2. Verify that .NET is available:
+
+   ```bash
+   dotnet --info
+   ```
+
+3. If the command is still not found, ensure the .NET installation directory is in your `PATH`.
+
+On macOS (Apple Silicon), add this to your shell profile if necessary:
+
+```bash
+export PATH="$PATH:/usr/local/share/dotnet"
+```
+
+or, if using Homebrew:
+
+```bash
+export PATH="$PATH:/opt/homebrew/share/dotnet"
+```
+
+After updating your `PATH`, restart your terminal and run:
+
+```bash
+dotnet --info
+```
+
 ### Mod stopped working after game update
 
 Game updates overwrite `.pak` files. Reinstall the mod:
