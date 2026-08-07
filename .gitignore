@@ -8,3 +8,6 @@ _MOD_BACKUPS/
 filenames.json
 *.pak
 NMS_MOD_INSTALLER.md
+.venv/
+dist/
+*.egg-info/

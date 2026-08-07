@@ -33,41 +33,59 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
 
 - **macOS** (tested on macOS 15+)
 - **Python 3.9+** (pre-installed on macOS)
-- **[hgpaktool](https://github.com/monkeyman192/HGPAKtool)** — HGPAK archive tool by monkeyman192
-- **.NET 8 Runtime** (`Microsoft.NETCore.App 8.x`) — required for EXML-based mods (MBINCompiler)
+- **[hgpaktool](https://github.com/monkeyman192/HGPAKtool)** — installed automatically with pip
+- **.NET 8 Runtime** — required for EXML-based mods, installed once via `nms-mod-installer setup`
 
 ## Installation
 
+### PyPI (recommended)
+
 ```bash
-# 1. Install hgpaktool
-pip3 install --user hgpaktool
-
-# 2. Clone this repo
-git clone https://github.com/Enki013/nms-mod-installer-macos.git
-cd nms-mod-installer-macos
-
-# 3. Make executable (required for ./ shortcuts below)
-chmod +x nms_mod_installer.py
+pip install nms-mod-installer-macos
 ```
 
-Commands below assume your shell’s current directory is the repo folder (`nms-mod-installer-macos` or wherever you cloned it). From anywhere else you can still run `python3 /path/to/nms_mod_installer.py …`.
+Then run the one-time setup to download MBINCompiler (required for EXML mods):
+
+```bash
+nms-mod-installer setup
+```
+
+This downloads `MBINCompiler.exe` + `libMBIN.dll` from the
+[official MBINCompiler releases](https://github.com/monkeyman192/MBINCompiler/releases)
+into `~/.local/share/nms-mod-installer/bin/` and verifies your `dotnet` installation.
+
+> **Note:** `.NET 8 Runtime` must be installed before running `setup`.
+> [Download here](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
+
+### Git clone (developers / contributors)
+
+```bash
+git clone https://github.com/Enki013/nms-mod-installer-macos.git
+cd nms-mod-installer-macos
+pip install hgpaktool
+python3 nms_mod_installer.py setup
+```
 
 ## Usage
+
+All commands are available as `nms-mod-installer <command>` after pip install,
+or `python3 nms_mod_installer.py <command>` from a git clone.
 
 ### Set game path (first time only)
 
 The tool auto-detects the game in common locations (`/Applications`, `~/Applications`, Steam library). If auto-detection fails, set it manually:
 
 ```bash
-./nms_mod_installer.py set-game "/Applications/No Man's Sky.app"
+nms-mod-installer set-game "/Applications/No Man's Sky.app"
 ```
 
-The path is saved and remembered for future runs. You can also use `--game <path>` with any command to override.
+The path is saved to `~/.local/share/nms-mod-installer/` and remembered for future runs.
+You can also use `--game <path>` with any command to override.
 
 ### Scan a mod (preview, no changes)
 
 ```bash
-./nms_mod_installer.py scan ~/Downloads/MyMod
+nms-mod-installer scan ~/Downloads/MyMod
 ```
 
 Shows which `.pak` files the mod will affect without modifying anything.
@@ -75,7 +93,7 @@ Shows which `.pak` files the mod will affect without modifying anything.
 ### Interactive wizard (beginner mode)
 
 ```bash
-./nms_mod_installer.py wizard
+nms-mod-installer wizard
 ```
 
 Step-by-step guided CLI flow for scan/install/list/uninstall without remembering commands.
@@ -83,7 +101,7 @@ Step-by-step guided CLI flow for scan/install/list/uninstall without remembering
 ### Install a mod
 
 ```bash
-./nms_mod_installer.py install ~/Downloads/MyMod
+nms-mod-installer install ~/Downloads/MyMod
 ```
 
 Full pipeline: scan, backup originals, extract, replace, repack, install.
@@ -95,7 +113,7 @@ To preview which paks a mod touches without installing, use `scan` (see above).
 ### List installed mods
 
 ```bash
-./nms_mod_installer.py list
+nms-mod-installer list
 ```
 
 <img src="docs/images/list.png" alt="Installed mods list with index numbers" width="900">
@@ -103,9 +121,9 @@ To preview which paks a mod touches without installing, use `scan` (see above).
 ### Uninstall a mod
 
 ```bash
-./nms_mod_installer.py uninstall 2
+nms-mod-installer uninstall 2
 # or by name:
-./nms_mod_installer.py uninstall "MyMod"
+nms-mod-installer uninstall "MyMod"
 ```
 
 Restores original `.pak` files from backup.
@@ -145,7 +163,7 @@ The tool automatically determines which `.pak` archive each file belongs to.
 
 ```bash
 # Preview
-./nms_mod_installer.py scan ~/Downloads/Turkish\ Localisation
+nms-mod-installer scan ~/Downloads/Turkish\ Localisation
 
 # Output:
 # Mod would affect 3 pak(s):
@@ -154,13 +172,13 @@ The tool automatically determines which `.pak` archive each file belongs to.
 #   NMSARC.fonts.pak       (1 file)
 
 # Install
-./nms_mod_installer.py install ~/Downloads/Turkish\ Localisation
+nms-mod-installer install ~/Downloads/Turkish\ Localisation
 
 # Verify
-./nms_mod_installer.py list
+nms-mod-installer list
 
 # Uninstall if needed
-./nms_mod_installer.py uninstall 1
+nms-mod-installer uninstall 1
 ```
 
 ## Game File Structure (macOS)
@@ -211,13 +229,13 @@ On first run, the tool scans all `.pak` files and builds an index cache (`_pak_i
 
 ## Troubleshooting
 
-### Permission denied (do not use `sudo python3`)
+### Permission denied (do not use `sudo`)
 
-The installer must write inside `No Man's Sky.app/.../MACOSBANKS/`. If you see **Permission denied**, do **not** run it as `sudo python3 …` (that runs the script as root and can confuse file ownership).
+The installer must write inside `No Man's Sky.app/.../MACOSBANKS/`. If you see **Permission denied**, do **not** run it with `sudo` (that runs the script as root and can confuse file ownership).
 
 **Preferred:** install or copy the game under your user, e.g. `~/Applications/No Man's Sky.app`, so you already own the files.
 
-**If the game is in `/Applications` and owned by root**, fix ownership once, then use `./nms_mod_installer.py` as your normal user:
+**If the game is in `/Applications` and owned by root**, fix ownership once:
 
 ```bash
 sudo chown -R "$(whoami)" "/Applications/No Man's Sky.app"
@@ -226,27 +244,22 @@ sudo chown -R "$(whoami)" "/Applications/No Man's Sky.app"
 ### hgpaktool not found
 
 ```bash
-pip3 install --user hgpaktool
+pip install hgpaktool
 
-# If not on PATH:
+# If not on PATH after pip install:
 export PATH="$PATH:$HOME/Library/Python/3.9/bin"
 ```
 
-### .NET runtime mismatch (EXML mods)
+### MBINCompiler not found (EXML mods)
 
-If you see an error like:
-- `You must install or update .NET to run this application`
-- `Framework: 'Microsoft.NETCore.App', version '8.0.xx'`
-
-Install **.NET 8 Runtime** (arm64 on Apple Silicon), then verify:
-
-[Download .NET 8](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
+If you see `MBINCompiler not found`, run the setup command:
 
 ```bash
-dotnet --list-runtimes
+nms-mod-installer setup
 ```
 
-You should see `Microsoft.NETCore.App 8.0.x`.
+This downloads `MBINCompiler.exe` and `libMBIN.dll` automatically.
+Requires [.NET 8 Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
 
 ### `.NET` is installed but `dotnet` is not found
 
@@ -284,7 +297,7 @@ dotnet --info
 Game updates overwrite `.pak` files. Reinstall the mod:
 
 ```bash
-./nms_mod_installer.py install ~/Downloads/MyMod --force-reindex
+nms-mod-installer install ~/Downloads/MyMod --force-reindex
 ```
 
 ### Game won't launch / crashes
@@ -292,7 +305,7 @@ Game updates overwrite `.pak` files. Reinstall the mod:
 Remove mods and restore originals:
 
 ```bash
-./nms_mod_installer.py uninstall "MyMod"
+nms-mod-installer uninstall "MyMod"
 ```
 
 Or manually:

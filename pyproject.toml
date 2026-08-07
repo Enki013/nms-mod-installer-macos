@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nms-mod-installer-macos"
+version = "0.1.0"
+description = "No Man's Sky mod installer for macOS — HGPAK extract / patch / repack pipeline"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+keywords = ["no-mans-sky", "nms", "mods", "macos", "hgpak"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment",
+]
+dependencies = [
+    "hgpaktool>=1.1.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Enki013/nms-mod-installer-macos"
+Repository = "https://github.com/Enki013/nms-mod-installer-macos"
+Issues = "https://github.com/Enki013/nms-mod-installer-macos/issues"
+
+[project.scripts]
+nms-mod-installer = "nms_mod_installer.installer:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nms_mod_installer"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "bin/",
+    "docs/",
+    ".gitignore",
+]
