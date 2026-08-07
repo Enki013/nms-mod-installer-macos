@@ -40,7 +40,7 @@ packages = ["src/nms_mod_installer"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-    "bin/",
+    ".github",
     "docs/",
     ".gitignore",
 ]

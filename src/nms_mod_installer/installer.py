@@ -23,6 +23,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import platform
+import re
 import time
 import urllib.request
 import zipfile
@@ -53,12 +55,11 @@ HGPAKTOOL_CANDIDATES = [
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-# Data directory: config + downloaded binaries
+# Data directory: config only
 DATA_DIR = Path.home() / ".local" / "share" / "nms-mod-installer"
-MBINCOMPILER_DATA_EXE = DATA_DIR / "bin" / "MBINCompiler.exe"  # downloaded by setup
 
-# Fallback: local bin/ dir (backward compat for git-cloned installs)
-MBINCOMPILER_LOCAL_BIN = SCRIPT_DIR / "bin" / "MBINCompiler"
+# Packaged binary
+MBINCOMPILER_BIN = SCRIPT_DIR / "bin" / "MBINCompiler"
 
 # Legacy DLL path (kept for very old installs)
 MBINCOMPILER_DLL = SCRIPT_DIR / "bin" / "MBINCompiler.dll"
@@ -185,22 +186,9 @@ def resolve_game_path(game_path_override: Optional[str] = None):
 
 
 def find_mbincompiler() -> Optional[str]:
-    """Locate the MBINCompiler binary.
-
-    Search order:
-      1. ~/.local/share/nms-mod-installer/bin/MBINCompiler.exe + dotnet (setup)
-      2. <repo>/bin/MBINCompiler                                          (git dev)
-      3. Legacy: <repo>/bin/MBINCompiler.dll + dotnet                    (old installs)
-    """
-    # 1. .exe downloaded by setup (requires dotnet)
-    if MBINCOMPILER_DATA_EXE.exists() and shutil.which("dotnet"):
-        return str(MBINCOMPILER_DATA_EXE)
-    # 2. Local bin/ self-contained binary (dev)
-    if MBINCOMPILER_LOCAL_BIN.exists() and os.access(MBINCOMPILER_LOCAL_BIN, os.X_OK):
-        return str(MBINCOMPILER_LOCAL_BIN)
-    # 3. Legacy DLL
-    if MBINCOMPILER_DLL.exists() and shutil.which("dotnet"):
-        return str(MBINCOMPILER_DLL)
+    """Locate the bundled MBINCompiler binary."""
+    if MBINCOMPILER_BIN.exists() and os.access(MBINCOMPILER_BIN, os.X_OK):
+        return str(MBINCOMPILER_BIN)
     return None
 
 
@@ -211,14 +199,18 @@ def run_mbincompiler(input_path: Path, output_dir: Path) -> Optional[Path]:
     Legacy: falls back to dotnet exec MBINCompiler.dll for old DLL installs.
     Auto-detects direction: .MBIN → .MXML  |  .MXML/.MXML → .MBIN
     """
-    mbinc = find_mbincompiler()
-    if not mbinc:
+    mbin_compiler = find_mbincompiler()
+    if not mbin_compiler:
         return None
 
     is_mbin  = input_path.suffix.lower() == ".mbin"
     is_mxml  = input_path.suffix.lower() in (".mxml", ".exml")
     # .exe and .dll both need dotnet; plain binary runs directly
-    needs_dotnet = mbinc.endswith(".dll") or mbinc.endswith(".exe")
+    # Note: the setup command now compiles a native macOS executable "MBINCompiler"
+    if mbin_compiler.endswith(".dll") or mbin_compiler.endswith(".exe"):
+        run_args = ["dotnet", "exec", mbin_compiler]
+    else:
+        run_args = [mbin_compiler]
 
     with tempfile.TemporaryDirectory(prefix="mbinc_") as tmpdir:
         # MBINCompiler writes output next to the input file, so work inside tmpdir
@@ -228,13 +220,14 @@ def run_mbincompiler(input_path: Path, output_dir: Path) -> Optional[Path]:
         else:
             tmp_in = Path(tmpdir) / input_path.name
         shutil.copy2(input_path, tmp_in)
+        cmd = run_args + ["-y", "-q", str(tmp_in)]
 
-        if needs_dotnet:
-            cmd = ["dotnet", "exec", mbinc, str(tmp_in)]
-        else:
-            cmd = [mbinc, str(tmp_in)]
+        env = os.environ.copy()
+        # Set DOTNET_ROOT for native macOS AppHost binaries installed in ~/.dotnet
+        if "DOTNET_ROOT" not in env:
+            env["DOTNET_ROOT"] = str(Path.home() / ".dotnet")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=tmpdir)
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=tmpdir, env=env)
 
         # Expected output file
         if is_mxml:
@@ -404,8 +397,7 @@ def convert_exml_to_mbin(exml_path: Path, mbin_path: Path, original_mbin: Option
     Pipeline for full-replacement mods:
       1. Compile mod EXML directly → MBIN  (no merge needed)
     """
-    mbinc = find_mbincompiler()
-    if not mbinc:
+    if not find_mbincompiler():
         error("MBINCompiler not found. Cannot convert EXML files.")
         return False
 
@@ -654,12 +646,11 @@ def install_mod(mod_folder: Path, game_path: Path, banks_dir: Path, tool_path: s
 
     has_exml = any(nc for _, _, nc in sum(pak_map.values(), []))
     if has_exml:
-        mbinc = find_mbincompiler()
-        if not mbinc:
+        if not find_mbincompiler():
             fatal(
                 "This mod contains .EXML files that require MBINCompiler for conversion.\n"
-                "  MBINCompiler not found. Run the setup command first:\n"
-                "    nms-mod-installer setup"
+                "  MBINCompiler not found in the package installation.\n"
+                "  Please reinstall the nms-mod-installer package."
             )
         info(f"MBINCompiler found (EXML → MBIN conversion available)")
 
@@ -1028,102 +1019,21 @@ def run_wizard():
                 raw = input("New No Man's Sky.app path: ").strip()
                 gp = _clean_user_path(raw)
                 banks = gp / MACOSBANKS_REL
-                if not gp.exists():
-                    warn(f"Path not found: {gp}")
-                    continue
-                if not banks.exists():
-                    warn(f"MACOSBANKS not found under: {gp}")
-                    continue
-                config = load_config()
-                config["game_path"] = str(gp)
-                save_config(config)
-                game_path, banks_dir = gp, banks
-                success(f"Game path updated: {gp}")
+                if not gp.exists() or not banks.exists():
+                    warn("Invalid path.")
+                else:
+                    game_path = gp
+                    banks_dir = banks
+                    config = load_config()
+                    config["game_path"] = str(game_path)
+                    save_config(config)
+                    success("Path updated.")
                 print()
 
             elif choice == "0":
-                info("Goodbye.")
-                return
-            else:
-                warn("Invalid choice. Please select 0-5.")
-                print()
-        except RuntimeError as e:
-            error(f"Operation failed: {e}")
-            print()
-
-
-# ── Setup Command ────────────────────────────────────────────────────────────
-
-def cmd_setup():
-    """Download MBINCompiler.exe + libMBIN.dll from GitHub into DATA_DIR/bin/."""
-    info("Setting up MBINCompiler...")
-    print()
-
-    # Check dotnet first
-    dotnet = shutil.which("dotnet")
-    if not dotnet:
-        fatal(
-            "dotnet not found. Install .NET 8 Runtime first:\n"
-            "  https://dotnet.microsoft.com/download/dotnet/8.0\n"
-            "Then retry: nms-mod-installer setup"
-        )
-    success(f"dotnet found: {dotnet}")
-    print()
-
-    # Fetch latest release metadata
-    info("Fetching latest MBINCompiler release from GitHub...")
-    req = urllib.request.Request(
-        MBINCOMPILER_RELEASES_API,
-        headers={"User-Agent": "nms-mod-installer-macos"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            release = json.load(resp)
-    except Exception as e:
-        fatal(f"Failed to fetch release info: {e}")
-
-    version = release.get("tag_name", "unknown")
-    assets  = release.get("assets", [])
-    info(f"Latest version: {Style.BOLD}{version}{Style.RESET}")
-    print()
-
-    bin_dir = DATA_DIR / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-
-    needed = {"MBINCompiler.exe", "libMBIN.dll", "mapping.json"}
-    to_download = [a for a in assets if a["name"] in needed]
-
-    if not any(a["name"] == "MBINCompiler.exe" for a in to_download):
-        fatal(
-            "MBINCompiler.exe not found in release assets.\n"
-            "Download manually from:\n"
-            "  https://github.com/monkeyman192/MBINCompiler/releases"
-        )
-
-    for asset in to_download:
-        dest = bin_dir / asset["name"]
-        info(f"Downloading {asset['name']} ({human_size(asset['size'])})...")
-
-        def _reporthook(count, block_size, total, _name=asset["name"]):
-            downloaded = count * block_size
-            if total > 0:
-                pct = min(100, int(downloaded * 100 / total))
-                print(f"\r  {pct}% ({human_size(downloaded)} / {human_size(total)})",
-                      end="", flush=True)
-
-        urllib.request.urlretrieve(
-            asset["browser_download_url"], dest, reporthook=_reporthook
-        )
-        print()
-        success(f"  Saved: {asset['name']}")
-
-    print()
-    if MBINCOMPILER_DATA_EXE.exists():
-        success(f"MBINCompiler {version} ready: {bin_dir / 'MBINCompiler.exe'}")
-        info("You can now install EXML mods:  nms-mod-installer install <mod-folder>")
-    else:
-        error(f"Setup may have failed. Check {bin_dir} manually.")
-
+                break
+        except Exception as e:
+            error(f"Wizard error: {e}")
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -1148,12 +1058,6 @@ examples:
     sub = parser.add_subparsers(dest="command", required=True)
 
     game_help = "Path to No Man's Sky.app (auto-detected if not provided)"
-
-    # setup
-    sub.add_parser(
-        "setup",
-        help="Download MBINCompiler (required for EXML mods). Run once after install.",
-    )
 
     # set-game
     p_setgame = sub.add_parser("set-game", help="Set the game path")
@@ -1189,10 +1093,6 @@ examples:
     print(f"{Style.BOLD}NMS Mod Installer for macOS{Style.RESET}")
     print(f"{Style.DIM}HGPAK extract / replace / repack pipeline{Style.RESET}")
     print()
-
-    if args.command == "setup":
-        cmd_setup()
-        return
 
     if args.command == "wizard":
         run_wizard()

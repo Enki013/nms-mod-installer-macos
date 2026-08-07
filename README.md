@@ -32,9 +32,9 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
 ## Requirements
 
 - **macOS** (tested on macOS 15+)
-- **Python 3.9+** (pre-installed on macOS)
-- **[hgpaktool](https://github.com/monkeyman192/HGPAKtool)** — installed automatically with pip
-- **.NET 8 Runtime** — required for EXML-based mods, installed once via `nms-mod-installer setup`
+- **Python 3.9+**
+- [hgpaktool](https://github.com/monkeyman192/HGPAKtool) — installed automatically with pip
+- **.NET 8 Runtime** — required for EXML-based mods
 
 ## Installation
 
@@ -44,26 +44,12 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
 pip install nms-mod-installer-macos
 ```
 
-Then run the one-time setup to download MBINCompiler (required for EXML mods):
-
-```bash
-nms-mod-installer setup
-```
-
-This downloads `MBINCompiler.exe` + `libMBIN.dll` from the
-[official MBINCompiler releases](https://github.com/monkeyman192/MBINCompiler/releases)
-into `~/.local/share/nms-mod-installer/bin/` and verifies your `dotnet` installation.
-
-> **Note:** `.NET 8 Runtime` must be installed before running `setup`.
-> [Download here](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
-
 ### Git clone (developers / contributors)
 
 ```bash
 git clone https://github.com/Enki013/nms-mod-installer-macos.git
 cd nms-mod-installer-macos
 pip install hgpaktool
-python3 nms_mod_installer.py setup
 ```
 
 ## Usage
@@ -252,14 +238,11 @@ export PATH="$PATH:$HOME/Library/Python/3.9/bin"
 
 ### MBINCompiler not found (EXML mods)
 
-If you see `MBINCompiler not found`, run the setup command:
+If you see `MBINCompiler not found`, it means the native MBINCompiler binary bundled with this package is missing or corrupted. Simply reinstall the package:
 
 ```bash
-nms-mod-installer setup
+pip install --force-reinstall nms-mod-installer-macos
 ```
-
-This downloads `MBINCompiler.exe` and `libMBIN.dll` automatically.
-Requires [.NET 8 Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
 
 ### `.NET` is installed but `dotnet` is not found
 
@@ -324,9 +307,23 @@ xattr -cr ~/Applications/No\ Man\'s\ Sky.app
 codesign --force --deep --sign - ~/Applications/No\ Man\'s\ Sky.app
 ```
 
+See `docs/mod_format.md` for a comprehensive guide on the `.EXML` / `.MXML` format used for patching No Man's Sky.
+
+## 🛠 MBINCompiler & Troubleshooting
+
+This package bundles a native macOS build of **MBINCompiler**, which handles the conversion of `.EXML` mod patch files to `.MBIN`. Please keep the following in mind:
+
+- **Game Updates**: Every major No Man's Sky update typically breaks several `.MBIN` formats. Because MBINCompiler is tied to specific game versions, `.EXML` mods might fail to install shortly after a game update until the mod author updates their mod and we bundle the newest MBINCompiler release.
+- **Conversion Errors**: If you encounter an error like `[ERR] MBINCompiler failed` or `Skipping ... (conversion failed)`, it usually means:
+  1. The `.EXML` mod has syntax errors or is made for an older version of the game.
+  2. You haven't installed the **.NET 8 Runtime** required to run the bundled MBINCompiler.
+  3. The current version of MBINCompiler hasn't been updated for the latest game patch yet.
+
+To verify if an `.EXML` mod is broken, you can try running `MBINCompiler` manually on the vanilla `.MBIN` file. If vanilla files unpack correctly but the mod fails to patch, the mod is likely outdated.
+
 ## License
 
-[MIT](LICENSE)
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Credits
 
