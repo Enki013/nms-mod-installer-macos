@@ -215,6 +215,31 @@ On first run, the tool scans all `.pak` files and builds an index cache (`_pak_i
 
 ## Troubleshooting
 
+### `pip install` fails / Command Not Found
+
+macOS includes a protection mechanism (PEP 668) that prevents pip from installing packages system-wide. If `pip install nms-mod-installer-macos` fails, or if you get a `zsh: command not found: nms-mod-installer` error, you have two options:
+
+**Option 1: Use `pipx` (Recommended)**
+
+```bash
+# 1. Install pipx via Homebrew
+brew install pipx
+pipx ensurepath
+
+# 2. Restart your terminal (close and reopen)
+
+# 3. Install the app globally in a safe environment
+pipx install nms-mod-installer-macos
+```
+
+**Option 2: Bypass system protection (Alternative)**
+
+If you prefer using standard pip, you can bypass the restriction by installing it for your user only:
+
+```bash
+pip3 install --break-system-packages --user nms-mod-installer-macos
+```
+
 ### Permission denied (do not use `sudo`)
 
 The installer must write inside `No Man's Sky.app/.../MACOSBANKS/`. If you see **Permission denied**, do **not** run it with `sudo` (that runs the script as root and can confuse file ownership).

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nms-mod-installer-macos"
-version = "0.1.0"
+version = "0.2.1"
 description = "No Man's Sky mod installer for macOS — HGPAK extract / patch / repack pipeline"
 readme = "README.md"
 license = { file = "LICENSE" }
