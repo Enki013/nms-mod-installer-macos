@@ -211,26 +211,52 @@ def run_mbincompiler(input_path: Path, output_dir: Path) -> Optional[Path]:
 
 
 def is_partial_exml(exml_path: Path) -> bool:
-    """Detect if an EXML file is a partial modification (delta patch)."""
+    """Detect if an EXML file is a partial modification (delta patch).
+
+    Detection priority:
+      1. Root must be <Data template="..."> — otherwise it can't be a valid patch.
+      2. Any Property with _index or _remove → definitive patch indicator.
+      3. Very few top-level Properties (≤ 5) → likely a patch.
+      4. Otherwise → treat as full replacement.
+    """
     import xml.etree.ElementTree as ET
     try:
         tree = ET.parse(exml_path)
         root = tree.getroot()
-        props = root.findall(".//Property")
-        has_id = any(p.get("_id") is not None for p in props)
-        total_top_level = len(root.findall("./Property"))
-        deep_count = len(props)
-        if has_id and deep_count < 50:
+
+        # Must be a <Data template="..."> root to be a valid NMS patch
+        if root.tag != "Data" or not root.get("template"):
+            return False
+
+        all_props = root.findall(".//Property")
+
+        # Definitive patch indicators: _index or _remove are only used in patches
+        has_patch_attrs = any(
+            p.get("_index") is not None or p.get("_remove") is not None
+            for p in all_props
+        )
+        if has_patch_attrs:
             return True
-        if not has_id and deep_count < 20 and total_top_level > 0:
+
+        # Heuristic: very few top-level properties compared to full vanilla files
+        top_level = root.findall("./Property")
+        if len(top_level) <= 5:
             return True
+
         return False
     except Exception:
         return False
 
 
 def merge_exml(original_exml: Path, mod_exml: Path, output_exml: Path) -> bool:
-    """Merge a partial mod EXML into the full original EXML."""
+    """Merge a partial mod EXML into the full original EXML.
+
+    Replicates the NMS engine's own patch merge semantics:
+      - Property[@name] → match by name, update value, recurse into children
+      - Property[@_index] → target that positional element in a same-name list
+      - Property[@_remove] → delete the targeted element
+      - No match found → append as new element
+    """
     import xml.etree.ElementTree as ET
 
     try:
@@ -242,48 +268,84 @@ def merge_exml(original_exml: Path, mod_exml: Path, output_exml: Path) -> bool:
 
     orig_root = orig_tree.getroot()
     mod_root = mod_tree.getroot()
-
-    def find_by_id(parent, tag, id_val):
-        for child in parent.iter(tag):
-            if child.get("_id") == id_val:
-                return child
-        return None
-
-    def find_by_name(parent, name_val):
-        for child in parent:
-            if child.tag == "Property" and child.get("name") == name_val:
-                return child
-        return None
+    merged_count = [0]
+    failed_count = [0]
 
     def merge_properties(orig_parent, mod_parent):
         for mod_prop in mod_parent:
             if mod_prop.tag != "Property":
                 continue
 
-            mod_id = mod_prop.get("_id")
-            mod_name = mod_prop.get("name")
-            mod_value = mod_prop.get("value")
+            mod_name  = mod_prop.get("name")
+            mod_index = mod_prop.get("_index")
+            mod_remove = mod_prop.get("_remove")
+            mod_value  = mod_prop.get("value")
 
-            target = None
-            if mod_id:
-                target = find_by_id(orig_parent, "Property", mod_id)
-                if target is not None:
-                    for key, val in mod_prop.attrib.items():
-                        if key != "_id":
-                            target.set(key, val)
-                    merge_properties(target, mod_prop)
+            # ── A. _index: positional array targeting ────────────────────────
+            if mod_index is not None:
+                try:
+                    idx = int(mod_index)
+                except ValueError:
+                    warn(f"    Invalid _index value '{mod_index}' on Property name='{mod_name}'")
+                    failed_count[0] += 1
                     continue
 
-            if mod_name:
-                target = find_by_name(orig_parent, mod_name)
-                if target is not None:
+                # Collect all same-named siblings in vanilla
+                siblings = [
+                    c for c in orig_parent
+                    if c.tag == "Property" and c.get("name") == mod_name
+                ]
+
+                if idx < 0 or idx >= len(siblings):
+                    warn(f"    _index={idx} out of range for Property name='{mod_name}' "
+                         f"(vanilla has {len(siblings)} entries) — skipping")
+                    failed_count[0] += 1
+                    continue
+
+                target = siblings[idx]
+
+                if mod_remove:
+                    orig_parent.remove(target)
+                    merged_count[0] += 1
+                else:
                     if mod_value is not None:
                         target.set("value", mod_value)
-                    if len(mod_prop) > 0:
+                    if len(mod_prop):  # recurse into children
                         merge_properties(target, mod_prop)
-                    continue
+                    merged_count[0] += 1
+                continue
+
+            # ── B. name-only: match first occurrence, update, recurse ─────────
+            if mod_name:
+                target = orig_parent.find(f"Property[@name='{mod_name}']")
+
+                if target is not None:
+                    if mod_remove:
+                        orig_parent.remove(target)
+                        merged_count[0] += 1
+                    else:
+                        if mod_value is not None:
+                            target.set("value", mod_value)
+                        if len(mod_prop):  # recurse into children
+                            merge_properties(target, mod_prop)
+                        merged_count[0] += 1
+                else:
+                    # No match → new property, append to parent
+                    import copy
+                    orig_parent.append(copy.deepcopy(mod_prop))
+                    merged_count[0] += 1
+                continue
+
+            warn(f"    Skipping Property with no 'name' and no '_index': {mod_prop.attrib}")
+            failed_count[0] += 1
 
     merge_properties(orig_root, mod_root)
+
+    if merged_count[0] == 0:
+        warn("    merge_exml: no properties were matched or appended")
+    else:
+        info(f"    Merged {merged_count[0]} propert{'y' if merged_count[0] == 1 else 'ies'}"
+             + (f", {failed_count[0]} skipped" if failed_count[0] else ""))
 
     ET.indent(orig_tree, space="  ")
     orig_tree.write(output_exml, encoding="utf-8", xml_declaration=True)
@@ -291,7 +353,16 @@ def merge_exml(original_exml: Path, mod_exml: Path, output_exml: Path) -> bool:
 
 
 def convert_exml_to_mbin(exml_path: Path, mbin_path: Path, original_mbin: Optional[Path] = None) -> bool:
-    """Convert EXML to MBIN with optional merge for partial mods."""
+    """Convert EXML to MBIN with merge step for partial (patch) mods.
+
+    Pipeline for patch mods:
+      1. Decompile vanilla MBIN → vanilla EXML
+      2. Merge patch EXML into vanilla EXML  (replicate NMS runtime semantics)
+      3. Compile merged EXML → final MBIN
+
+    Pipeline for full-replacement mods:
+      1. Compile mod EXML directly → MBIN  (no merge needed)
+    """
     mbinc = find_mbincompiler()
     if not mbinc:
         error("MBINCompiler not found. Cannot convert EXML files.")
@@ -302,30 +373,49 @@ def convert_exml_to_mbin(exml_path: Path, mbin_path: Path, original_mbin: Option
     with tempfile.TemporaryDirectory(prefix="exml_conv_") as tmpdir:
         tmpdir_p = Path(tmpdir)
 
-        if partial and original_mbin and original_mbin.exists():
-            info(f"    Partial EXML detected -> merging with original game data")
+        if partial:
+            # ── Patch mod: must have vanilla MBIN to merge against ────────────
+            if not original_mbin or not original_mbin.exists():
+                warn(
+                    f"    Patch EXML detected but vanilla MBIN not found — "
+                    f"cannot merge without original game data. Skipping."
+                )
+                return False
+
+            info(f"    Patch EXML detected → merging with vanilla game data")
+
+            # Step 1: decompile vanilla MBIN → EXML
             orig_exml = run_mbincompiler(original_mbin, tmpdir_p)
             if not orig_exml:
-                error(f"    Failed to decompile original MBIN")
+                error(f"    Failed to decompile vanilla MBIN: {original_mbin.name}")
                 return False
 
+            # Step 2: merge patch into vanilla
             merged_exml = tmpdir_p / "merged.MXML"
             if not merge_exml(orig_exml, exml_path, merged_exml):
-                error(f"    EXML merge failed")
+                error(f"    EXML merge failed for: {exml_path.name}")
                 return False
 
+            # Step 3: compile merged EXML → MBIN
             result_mbin = run_mbincompiler(merged_exml, tmpdir_p)
             if result_mbin:
                 shutil.copy2(result_mbin, mbin_path)
                 return True
+
+            error(f"    MBINCompiler failed to compile merged EXML")
             return False
+
         else:
+            # ── Full-replacement mod: compile directly ────────────────────────
+            info(f"    Full EXML detected → compiling directly")
             tmp_mxml = tmpdir_p / exml_path.with_suffix(".MXML").name
             shutil.copy2(exml_path, tmp_mxml)
             result_mbin = run_mbincompiler(tmp_mxml, tmpdir_p)
             if result_mbin:
                 shutil.copy2(result_mbin, mbin_path)
                 return True
+
+            error(f"    MBINCompiler failed to compile EXML: {exml_path.name}")
             return False
 
 
