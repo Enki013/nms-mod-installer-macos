@@ -6,28 +6,38 @@ On macOS, the game's built-in `MODS` folder does not work. This tool bridges tha
 
 ## How It Works
 
-```
-┌──────────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Mod Folder  │────>│  Scan &  │────>│  Extract  │────>│ Replace  │────>│  Repack  │
-│              │     │  Match   │     │   .pak    │     │  Files   │     │  & Install│
-└──────────────┘     └──────────┘     └──────────┘     └──────────┘     └──────────┘
-                          │                                                   │
-                     Maps mod files                                    LZ4 compressed
-                     to game .paks                                     HGPAK v2 format
-                                                                            │
-                                                                            ▼
-                                                                    ┌──────────────┐
-                                                                    │  MACOSBANKS/ │
-                                                                    │  (game dir)  │
-                                                                    └──────────────┘
+```mermaid
+graph LR
+    A["📁 Mod Folder"] --> B["Scan & Match"]
+    B --> C["Backup .pak"]
+    C --> D["Extract .pak"]
+    D --> E{"EXML mod?"}
+    E -- Yes --> F["EXML → MBIN\n(MBINCompiler)"]
+    E -- No --> G["Replace Files"]
+    F --> G
+    G --> H["Repack (LZ4)"]
+    H --> I["MACOSBANKS/\n(game dir)"]
+
+    classDef input fill:#3498db,stroke:#2980b9,stroke-width:2px,color:#fff
+    classDef process fill:#2ecc71,stroke:#27ae60,stroke-width:2px,color:#fff
+    classDef convert fill:#e67e22,stroke:#d35400,stroke-width:2px,color:#fff
+    classDef output fill:#9b59b6,stroke:#8e44ad,stroke-width:2px,color:#fff
+    classDef decision fill:#34495e,stroke:#2c3e50,stroke-width:2px,color:#fff
+
+    class A input
+    class B,C,D,G,H process
+    class F convert
+    class I output
+    class E decision
 ```
 
 1. **Scan** — Indexes all `.pak` archives in the game and maps each mod file to its target `.pak`
 2. **Backup** — Copies original `.pak` files to `_MOD_BACKUPS/` before any changes
-3. **Extract** — Unpacks affected `.pak` archives using `hgpaktool -U -M`
-4. **Replace** — Overwrites extracted files with mod versions (case-insensitive matching)
-5. **Repack** — Rebuilds `.pak` archives with LZ4 compression using `hgpaktool -R -Z`
-6. **Register** — Records installed mod metadata for clean uninstall later
+3. **Extract** — Unpacks affected `.pak` archives using `hgpaktool`
+4. **Convert** — If the mod contains `.EXML` patch files, converts them to `.MBIN` via the bundled MBINCompiler
+5. **Replace** — Overwrites extracted files with mod versions (case-insensitive matching)
+6. **Repack** — Rebuilds `.pak` archives with LZ4 compression
+7. **Register** — Records installed mod metadata for clean uninstall later
 
 ## Requirements
 
