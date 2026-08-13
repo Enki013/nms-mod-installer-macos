@@ -453,13 +453,14 @@ def convert_exml_to_mbin(exml_path: Path, mbin_path: Path, original_mbin: Option
 
 
 def is_exml_file(path: str) -> bool:
-    return path.lower().endswith(".exml")
-
+    lower_path = path.lower()
+    return lower_path.endswith(".exml") or lower_path.endswith(".mxml")
 
 def exml_to_mbin_path(path: str) -> str:
-    """Convert .exml/.EXML extension to .mbin in a path string."""
-    if path.lower().endswith(".exml"):
-        return path[:-5] + ".mbin"
+    """Convert .exml/.EXML or .mxml/.MXML extension to .mbin in a path string."""
+    lower_path = path.lower()
+    if lower_path.endswith(".exml") or lower_path.endswith(".mxml"):
+        return path[:-5] + ".MBIN"
     return path
 
 
